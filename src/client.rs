@@ -45,6 +45,8 @@ impl Client {
         }
     }
 
+    /// Method to use for the ability to connect the client to an outside address,
+    /// handling it as same "Connection" as all receiving connections
     pub fn connect(&mut self, address: &str) -> Result<()> {
         let stream = TcpStream::connect(address)?;
         let (s, r) = channel();
@@ -58,11 +60,6 @@ impl Client {
         self.connections.lock().unwrap().push(c);
         Ok(())
     }
-
-    // /// Messages which are `d from connections will be sent over through this method
-    // pub fn receive(&self) -> Result<Message, TryRecvError> {
-    //     self.receiver_of_messages_from_connections.try_recv()
-    // }
 
     /// Let the client to recieve messages
     /// This function is nonblocking
@@ -95,38 +92,6 @@ impl Client {
         }));
     }
 }
-// // private function used by "start_handling"
-// fn handle_tcp_stream(
-//     stream: TcpStream,
-//     // own client may recieve message, these are sent to a receiver on the client through this sender the Connection got
-//     sender_to_client: Sender<Message>,
-//     // own client may send messages, which are recieved by the Connection through this receiver
-//     receiver_of_connection: Receiver<Message>,
-// ) -> Connection {
-//     // let sender_clone = sender_to_client.clone();
-//     let incoming_address = stream.peer_addr().unwrap().to_string();
-//     let reader = BufReader::new(stream.try_clone().unwrap());
-//     let mut writer = BufWriter::new(stream);
-//     Connection {
-//         source: incoming_address,
-//         read_handle: spawn(move || {
-//             for line in reader.lines() {
-//                 let json = line.expect("Client Disconnected");
-//                 let message = serde_json::from_str::<Message>(&json).unwrap();
-//                 // sender_clone.send(message).unwrap();
-//                 sender_to_client.send(message).unwrap();
-//             }
-//         }),
-//         write_handle: spawn(move || {
-//             while let Ok(message) = receiver_of_connection.recv() {
-//                 let message_json = serde_json::to_string(&message).unwrap() + "\n";
-//                 writer.write_all(message_json.as_bytes()).unwrap();
-//                 writer.flush().unwrap();
-//             }
-//         }),
-//         // sender_to_client,
-//     }
-// }
 
 #[derive(Debug)]
 pub struct Connection {
@@ -194,12 +159,8 @@ fn read_handler(reader: BufReader<TcpStream>, sender_to_client: Sender<Message>)
 /// * Text - anything that isn't a command
 /// ---
 /// Can be whatever you want, handle this as you may please
-
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Message {
     Command(String),
     Text(String),
 }
-
-// transmitter
-// receiver

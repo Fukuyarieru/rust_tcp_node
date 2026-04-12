@@ -1,14 +1,13 @@
+use serde::{Deserialize, Serialize};
 use std::{
     io::{BufRead, BufReader, BufWriter, Result, Write},
     net::{TcpListener, TcpStream},
     sync::{
         Arc, Mutex,
-        mpsc::{Receiver, Sender, TryRecvError, channel},
+        mpsc::{Receiver, Sender, channel},
     },
     thread::{JoinHandle, spawn},
 };
-
-use serde::{Deserialize, Serialize};
 
 pub struct Client {
     pub connections: Arc<Mutex<Vec<Connection>>>,
@@ -62,8 +61,11 @@ impl Client {
     }
 
     /// Let the client to recieve messages
+    ///
     /// This function is nonblocking
+    ///
     /// It will start a seperate thread to accept incoming tcp connections
+    ///
     /// and transform them into the 'Connection' made type and store them
     pub fn start_handling(&mut self) {
         let tcp_listener = self.tcp_listener.try_clone().unwrap();
@@ -141,17 +143,6 @@ impl Connection {
     pub fn source(&self) -> String {
         self.source.clone()
     }
-}
-
-fn read_handler(reader: BufReader<TcpStream>, sender_to_client: Sender<Message>) -> JoinHandle<()> {
-    spawn(move || {
-        for line in reader.lines() {
-            let json = line.expect("Client Disconnected");
-            let message = serde_json::from_str::<Message>(&json).unwrap();
-            // sender_clone.send(message).unwrap();
-            sender_to_client.send(message).unwrap();
-        }
-    })
 }
 
 ///  Example:

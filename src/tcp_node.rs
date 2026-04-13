@@ -19,21 +19,22 @@ pub struct TcpNode {
     /// vec storing each sender of every connection
     senders_to_connections: Arc<Mutex<Vec<Sender<Value>>>>,
     /// thread accepting new connections
+    /// * The thread will be created only during the `start_handling` method
     new_connections_handle: Option<JoinHandle<()>>,
-    /// sender to send messages to connections
-    pub sender_to_connections: Sender<Value>,
-    /// thread sending messages of the client to all connections
+    /// * Sender to send messages to connections
+    /// * May be None if `start_handling` hasn't been called yet
+    pub sender_to_connections: Option<Sender<Value>>,
+    /// thread sending messages of the client to all
+    /// * May be None if `start_handling` hasn't been called yet
     sender_to_connections_handle: Option<JoinHandle<()>>,
 }
 
 impl TcpNode {
-    /// method to create a new client.
-    /// said client needs to be "started" to accept connections
+    /// * Method to create a new client.
+    /// * Said client needs to be "started" to accept connections using `start_handling`
     pub fn new() -> Self {
         let (sender, receiver) = channel();
-        let (sender_to_connections, receiver_of_sender_to_connections) = channel();
         let senders_to_connections = Arc::new(Mutex::new(Vec::new()));
-        let senders_to_connections_clone = senders_to_connections.clone();
         let tcp_listener = TcpListener::bind("127.0.0.1:0").unwrap();
         #[cfg(debug_assertions)]
         println!(
@@ -47,16 +48,8 @@ impl TcpNode {
             sender_to_client: sender,
             senders_to_connections: senders_to_connections,
             new_connections_handle: None,
-            // CONSIDER MOVING THIS BACK TO "start_handling" (on the grounds of not starting a thread immeadiatly upon creating a TcpNode)
-            sender_to_connections: sender_to_connections,
-            sender_to_connections_handle: Some(spawn(move || {
-                while let Ok(message) = receiver_of_sender_to_connections.recv() {
-                    for sender_to_connection in senders_to_connections_clone.lock().unwrap().iter()
-                    {
-                        sender_to_connection.send(message.clone()).unwrap();
-                    }
-                }
-            })),
+            sender_to_connections: None,
+            sender_to_connections_handle: None,
         }
     }
 
@@ -65,23 +58,17 @@ impl TcpNode {
     pub fn connect(&mut self, address: &str) -> Result<()> {
         let stream = TcpStream::connect(address)?;
         let (s, r) = channel();
-        let c = Connection::new(
-            stream,
-            self.sender_to_client.clone(),
-            // TODO: NEED TO FIND A WAY FOR RECEIVER
-            r,
-        );
+        let c = Connection::new(stream, self.sender_to_client.clone(), r);
+        #[cfg(debug_assertions)]
+        println!("CONNECTING -> {:?}", c);
         self.senders_to_connections.lock().unwrap().push(s);
         self.connections.lock().unwrap().push(c);
         Ok(())
     }
 
-    /// Let the client to recieve messages
-    ///
-    /// This function is nonblocking
-    ///
-    /// It will start a seperate thread to accept incoming tcp connections
-    ///
+    /// Let the client to recieve messages\
+    /// This function is nonblocking\
+    /// It will start a seperate thread to accept incoming tcp connections\
     /// and transform them into the 'Connection' made type and store them
     pub fn start_handling(&mut self) {
         let tcp_listener = self.tcp_listener.try_clone().unwrap();
@@ -96,6 +83,16 @@ impl TcpNode {
                 println!("CONNECTION -> {:?}", c);
                 connections.lock().unwrap().push(c);
                 senders_to_connections.lock().unwrap().push(s);
+            }
+        }));
+        let senders_to_connections_clone = self.senders_to_connections.clone();
+        let (sender_to_connections, receiver_of_sender_to_connections) = channel::<Value>();
+        self.sender_to_connections = Some(sender_to_connections);
+        self.sender_to_connections_handle = Some(spawn(move || {
+            while let Ok(message) = receiver_of_sender_to_connections.recv() {
+                for sender_to_connection in senders_to_connections_clone.lock().unwrap().iter() {
+                    sender_to_connection.send(message.clone()).unwrap();
+                }
             }
         }));
     }
@@ -150,14 +147,3 @@ impl Connection {
         self.source.clone()
     }
 }
-
-// ///  Example:
-// /// * Command - starts with /
-// /// * Text - anything that isn't a command
-// /// ---
-// /// Can be whatever you want, handle this as you may please
-// #[derive(Serialize, Deserialize, Debug, Clone)]
-// pub enum Value {
-//     Command(String),
-//     Text(String),
-// }

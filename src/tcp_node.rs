@@ -29,7 +29,9 @@ pub struct TcpNode {
     /// * `TODO: TO CLOSE THREAD WE JOIN IT AND TAKE BACK THE RECEIVER TO NOT BREAK CONNECTION WITH THE SENDER
     sender_to_connections_handle: Option<JoinHandle<Receiver<Value>>>,
     ///
-    handling_method: Arc<Mutex<Option<fn(Value)>>>,
+    value_handling_method: Arc<Mutex<Option<fn(Value)>>>,
+    ///
+    connection_handling_method: Arc<Mutex<Option<fn(&mut Connection)>>>,
 }
 
 impl TcpNode {
@@ -59,9 +61,12 @@ impl TcpNode {
             new_connections_handle: None,
             sender_to_connections: None,
             sender_to_connections_handle: None,
-            handling_method: Arc::new(Mutex::new(None)),
+            value_handling_method: Arc::new(Mutex::new(None)),
+            connection_handling_method: Arc::new(Mutex::new(None)),
         })
     }
+
+    /// TODO: START_RECEIVING_CONNECTIONS AND START_RECEVING_MESSAGES?
 
     /// Method to use for the ability to connect the client to an outside address,\
     /// handling it as same "Connection" as all receiving connections\
@@ -69,7 +74,13 @@ impl TcpNode {
     pub fn connect(&mut self, address: &str, handling_method: Option<fn(Value)>) -> Result<()> {
         let stream = TcpStream::connect(address)?;
         let (s, r) = channel();
-        let c = Connection::new(stream, self.sender_to_client.clone(), r, handling_method);
+        let c = Connection::new(
+            stream,
+            self.sender_to_client.clone(),
+            s.clone(),
+            r,
+            handling_method,
+        );
         #[cfg(debug_assertions)]
         println!("CONNECTING -> {:?}", c);
         self.senders_to_connections.lock().unwrap().push(s);
@@ -85,16 +96,23 @@ impl TcpNode {
         let connections = self.connections.clone();
         let sender_to_client = self.sender_to_client.clone();
         let senders_to_connections = self.senders_to_connections.clone();
-        let handling_method = self.handling_method.clone();
+        let value_handling_method = self.value_handling_method.clone();
+        let connection_handling_method = self.connection_handling_method.clone();
         self.new_connections_handle = Some(spawn(move || {
             for stream in tcp_listener.incoming() {
                 let (s, r) = channel::<Value>();
-                let c = Connection::new(
+                let mut c = Connection::new(
                     stream.unwrap(),
                     sender_to_client.clone(),
+                    s.clone(),
                     r,
-                    handling_method.lock().unwrap().clone(),
+                    value_handling_method.lock().unwrap().clone(),
                 );
+                if let Some(method) = *connection_handling_method.lock().unwrap() {
+                    #[cfg(debug_assertions)]
+                    println!("{:?}", method);
+                    method(&mut c);
+                }
                 #[cfg(debug_assertions)]
                 println!("CONNECTION -> {:?}", c);
                 connections.lock().unwrap().push(c);
@@ -146,6 +164,14 @@ impl TcpNode {
     pub fn change_address(&mut self, address: &str) {
         todo!()
     }
+
+    pub fn change_value_handling_method(&self, handling_method: Option<fn(Value)>) {
+        *self.value_handling_method.lock().unwrap() = handling_method;
+    }
+
+    pub fn change_connection_handling_method(&self, handling_method: Option<fn(&mut Connection)>) {
+        *self.connection_handling_method.lock().unwrap() = handling_method;
+    }
 }
 
 #[derive(Debug)]
@@ -155,11 +181,13 @@ pub struct Connection {
     /// thread handling the connected client
     _read_handle: JoinHandle<()>,
     /// thread handling sending messages to a connection
-    _write_handle: JoinHandle<Receiver<Value>>,
-    // bake inside the Connection its' handling,
-    // local method stored with the connection,
-    // applies on incoming messages from the `_read_handle`,
-    pub connection_handle_method: Arc<Mutex<Option<fn(Value)>>>,
+    _write_handle: JoinHandle<()>,
+    /// bake inside the Connection its' handling,
+    /// local method stored with the connection,
+    /// applies on incoming messages from the `_read_handle`,
+    connection_handle_method: Arc<Mutex<Option<fn(Value)>>>,
+    ///
+    sender_to_connection: Sender<Value>,
 }
 
 impl Connection {
@@ -170,6 +198,8 @@ impl Connection {
         stream: TcpStream,
         // own client may recieve message, these are sent to a receiver on the client through this sender the Connection got
         sender_to_client: Sender<Value>,
+        //
+        sender_to_connection: Sender<Value>,
         // own client may send messages, which are recieved by the Connection through this receiver
         receiver_of_connection: Receiver<Value>,
         // local method stored with the connection,
@@ -187,7 +217,9 @@ impl Connection {
                 for line in reader.lines() {
                     let json = line.expect("Client Disconnected");
                     let message = serde_json::from_str::<Value>(&json).unwrap();
-                    if let Some(method) = handling_method_clone.lock().unwrap().clone() {
+                    if let Some(method) = *handling_method_clone.lock().unwrap() {
+                        #[cfg(debug_assertions)]
+                        println!("{:?}", method);
                         method(message.clone())
                     }
                     sender_to_client.send(message).unwrap();
@@ -199,10 +231,14 @@ impl Connection {
                     writer.write_all(message_json.as_bytes()).unwrap();
                     writer.flush().unwrap();
                 }
-                receiver_of_connection
             }),
             connection_handle_method: handling_method,
+            sender_to_connection: sender_to_connection,
         }
+    }
+
+    pub fn sender_to_connection(&self) -> Sender<Value> {
+        self.sender_to_connection.clone()
     }
 
     pub fn change_method(&self, method: Option<fn(Value)>) {

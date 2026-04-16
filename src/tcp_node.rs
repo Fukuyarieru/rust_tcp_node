@@ -1,6 +1,6 @@
 use serde_json::Value;
 use std::{
-    io::{BufRead, BufReader, BufWriter, Result, Write},
+    io::Result,
     net::{TcpListener, TcpStream},
     sync::{
         Arc, Mutex,
@@ -8,6 +8,8 @@ use std::{
     },
     thread::{JoinHandle, spawn},
 };
+
+use crate::connection::Connection;
 
 pub struct TcpNode {
     pub connections: Arc<Mutex<Vec<Connection>>>,
@@ -27,7 +29,7 @@ pub struct TcpNode {
     /// thread sending messages of the client to all
     /// * May be None if `start_receiving` hasn't been called yet
     /// * `TODO: TO CLOSE THREAD WE JOIN IT AND TAKE BACK THE RECEIVER TO NOT BREAK CONNECTION WITH THE SENDER
-    sender_to_connections_handle: Option<JoinHandle<Receiver<Value>>>,
+    sender_to_connections_handle: Option<JoinHandle<()>>,
     ///
     value_handling_method: Arc<Mutex<Option<fn(Value)>>>,
     ///
@@ -145,7 +147,6 @@ impl TcpNode {
                     sender_to_connection.send(message.clone()).unwrap();
                 }
             }
-            receiver_of_sender_to_connections
         }));
     }
 
@@ -160,93 +161,11 @@ impl TcpNode {
         self.sender_to_connections_handle = None;
     }
 
-    /// Changing TcpListener and appropriate handling TODO
-    pub fn change_address(&mut self, address: &str) {
-        todo!()
-    }
-
     pub fn change_value_handling_method(&self, handling_method: Option<fn(Value)>) {
         *self.value_handling_method.lock().unwrap() = handling_method;
     }
 
     pub fn change_connection_handling_method(&self, handling_method: Option<fn(&mut Connection)>) {
         *self.connection_handling_method.lock().unwrap() = handling_method;
-    }
-}
-
-#[derive(Debug)]
-pub struct Connection {
-    /// source of the client connected
-    source: String,
-    /// thread handling the connected client
-    _read_handle: JoinHandle<()>,
-    /// thread handling sending messages to a connection
-    _write_handle: JoinHandle<()>,
-    /// bake inside the Connection its' handling,
-    /// local method stored with the connection,
-    /// applies on incoming messages from the `_read_handle`,
-    connection_handle_method: Arc<Mutex<Option<fn(Value)>>>,
-    ///
-    sender_to_connection: Sender<Value>,
-}
-
-impl Connection {
-    /// This is the method to convert tcp stream into a "Connection"\
-    /// interactions with the Connection are made using a channel() made before calling this method (sender,receiver)\
-    /// we give this function the receiver and handle the sender to be however we want to send messages to this Connection
-    pub fn new(
-        stream: TcpStream,
-        // own client may recieve message, these are sent to a receiver on the client through this sender the Connection got
-        sender_to_client: Sender<Value>,
-        //
-        sender_to_connection: Sender<Value>,
-        // own client may send messages, which are recieved by the Connection through this receiver
-        receiver_of_connection: Receiver<Value>,
-        // local method stored with the connection,
-        // applies on incoming messages from the `_read_handle`,
-        handle_method: Option<fn(Value)>,
-    ) -> Self {
-        let incoming_address = stream.peer_addr().unwrap().to_string();
-        let reader = BufReader::new(stream.try_clone().unwrap());
-        let mut writer = BufWriter::new(stream);
-        let handling_method = Arc::new(Mutex::new(handle_method));
-        let handling_method_clone = handling_method.clone();
-        Self {
-            source: incoming_address,
-            _read_handle: spawn(move || {
-                for line in reader.lines() {
-                    let json = line.expect("Client Disconnected");
-                    let message = serde_json::from_str::<Value>(&json).unwrap();
-                    if let Some(method) = *handling_method_clone.lock().unwrap() {
-                        #[cfg(debug_assertions)]
-                        println!("{:?}", method);
-                        method(message.clone())
-                    }
-                    sender_to_client.send(message).unwrap();
-                }
-            }),
-            _write_handle: spawn(move || {
-                while let Ok(message) = receiver_of_connection.recv() {
-                    let message_json = serde_json::to_string(&message).unwrap() + "\n";
-                    writer.write_all(message_json.as_bytes()).unwrap();
-                    writer.flush().unwrap();
-                }
-            }),
-            connection_handle_method: handling_method,
-            sender_to_connection: sender_to_connection,
-        }
-    }
-
-    pub fn sender_to_connection(&self) -> Sender<Value> {
-        self.sender_to_connection.clone()
-    }
-
-    pub fn change_method(&self, method: Option<fn(Value)>) {
-        *self.connection_handle_method.lock().unwrap() = method;
-    }
-
-    #[allow(dead_code)]
-    pub fn source(&self) -> String {
-        self.source.clone()
     }
 }

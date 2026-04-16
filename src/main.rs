@@ -7,6 +7,7 @@ use serde_json::json;
 
 use crate::tcp_node::TcpNode;
 
+mod connection;
 mod playground;
 mod tcp_node;
 

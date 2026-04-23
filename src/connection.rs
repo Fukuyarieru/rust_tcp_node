@@ -22,8 +22,6 @@ pub struct Connection {
     connection_handle_method: Arc<Mutex<Option<fn(String)>>>,
     ///
     sender_to_connection: Sender<String>,
-    ///
-    receiver_of_connection: Arc<Mutex<Receiver<String>>>,
 }
 
 impl Connection {
@@ -47,8 +45,6 @@ impl Connection {
         let mut writer = BufWriter::new(stream);
         let handling_method = Arc::new(Mutex::new(handle_method));
         let handling_method_clone = handling_method.clone();
-        let receiver_of_connection = Arc::new(Mutex::new(input_receiver));
-        let receiver_of_connection_clone = receiver_of_connection.clone();
         Self {
             source: incoming_address,
             _read_handle: spawn(move || {
@@ -64,23 +60,18 @@ impl Connection {
             }),
             _write_handle: spawn(move || {
                 // any warning or problem?
-                while let Ok(message) = receiver_of_connection_clone.lock().unwrap().recv() {
+                while let Ok(message) = input_receiver.recv() {
                     writer.write_all(message.as_bytes()).unwrap();
                     writer.flush().unwrap();
                 }
             }),
             connection_handle_method: handling_method,
             sender_to_connection: input_sender,
-            receiver_of_connection: receiver_of_connection,
         }
     }
 
     pub fn sender_to_connection(&self) -> Sender<String> {
         self.sender_to_connection.clone()
-    }
-
-    pub fn receiver_of_connection(&self) -> Arc<Mutex<Receiver<String>>> {
-        self.receiver_of_connection.clone()
     }
 
     pub fn change_method(&self, method: Option<fn(String)>) {

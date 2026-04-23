@@ -12,15 +12,16 @@ use std::{
 pub struct Connection {
     /// source of the client connected to the connection
     source: String,
-    /// thread handling the connected client
+    /// thread handling reading from the connected client
     _read_handle: JoinHandle<()>,
-    /// thread handling sending messages to a connection
+    /// thread handling sending messages to the connected client
     _write_handle: JoinHandle<()>,
-    /// bake inside the Connection its' handling,
     /// local method stored with the connection,
     /// applies on incoming messages from the `_read_handle`,
     connection_handle_method: Arc<Mutex<Option<fn(String)>>>,
-    ///
+    /// the connection receives messages through a sender,
+    /// said sender is given during construction of the
+    /// connection, and is cloned over here
     sender_to_connection: Sender<String>,
 }
 
@@ -59,7 +60,6 @@ impl Connection {
                 }
             }),
             _write_handle: spawn(move || {
-                // any warning or problem?
                 while let Ok(message) = input_receiver.recv() {
                     writer.write_all(message.as_bytes()).unwrap();
                     writer.flush().unwrap();
@@ -78,7 +78,6 @@ impl Connection {
         *self.connection_handle_method.lock().unwrap() = method;
     }
 
-    #[allow(dead_code)]
     pub fn source(&self) -> String {
         self.source.clone()
     }

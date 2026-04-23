@@ -1,4 +1,3 @@
-// use serde_json::String;
 use std::{
     io::Result,
     net::{TcpListener, TcpStream},
@@ -12,42 +11,44 @@ use std::{
 use crate::connection::Connection;
 
 pub struct TcpNode {
-    pub connections: Arc<Mutex<Vec<Connection>>>,
     tcp_listener: TcpListener,
+    /// stored connections
+    pub connections: Arc<Mutex<Vec<Connection>>>,
     /// connections send messages here
     pub receiver_of_messages_from_connections: Receiver<String>,
     /// sender given to each conenction to send the client new messages
     sender_to_client: Sender<String>,
-    /// vec storing each sender of every connection
+    /// senders to every connection
     senders_to_connections: Arc<Mutex<Vec<Sender<String>>>>,
     /// thread accepting new connections
     /// * The thread will be created only during the `start_receiving` method
     new_connections_handle: Option<JoinHandle<()>>,
     /// * Sender to send messages to connections
     /// * May be None if `start_receiving` hasn't been called yet
-    pub sender_to_connections: Option<Sender<String>>,
+    sender_to_connections: Option<Sender<String>>,
     ///
     receiver_of_sender_to_connections: Arc<Mutex<Option<Receiver<String>>>>,
-    /// thread sending messages of the client to all
+    /// thread sending messages of the client to all connections
     /// * May be None if `start_receiving` hasn't been called yet
-    /// * `TODO: TO CLOSE THREAD WE JOIN IT AND TAKE BACK THE RECEIVER TO NOT BREAK CONNECTION WITH THE SENDER
     sender_to_connections_handle: Option<JoinHandle<()>>,
-    ///
-    value_handling_method: Arc<Mutex<Option<fn(String)>>>,
-    ///
+    /// method given to every connection on every message received by the node
+    message_handling_method: Arc<Mutex<Option<fn(String)>>>,
+    /// method applied on every connection after construction
     connection_handling_method: Arc<Mutex<Option<fn(&mut Connection)>>>,
 }
 
 impl TcpNode {
-    /// * Method to create a new client.
-    /// * Will connect to random available address.
-    /// * Said client needs to be "started" to accept connections using `start_receiving`
+    /// Method to create a new client.\
+    /// Will connect to random available address.\
+    /// * use `start_receiving` to let the node accept connection
+    /// * use `start_sending` to let the node send messages
     pub fn new() -> Result<Self> {
         Self::new_with_address("127.0.0.1:0")
     }
 
-    /// * Method to create a new client.
-    /// * Said client needs to be "started" to accept connections using `start_receiving`
+    /// Method to create a new client.\
+    /// * use `start_receiving` to let the node accept connection
+    /// * use `start_sending` to let the node send messages
     pub fn new_with_address(address: &str) -> Result<Self> {
         let (sender, receiver) = channel();
         let tcp_listener = TcpListener::bind(address)?;
@@ -66,12 +67,12 @@ impl TcpNode {
             sender_to_connections: None,
             receiver_of_sender_to_connections: Arc::new(Mutex::new(None)),
             sender_to_connections_handle: None,
-            value_handling_method: Arc::new(Mutex::new(None)),
+            message_handling_method: Arc::new(Mutex::new(None)),
             connection_handling_method: Arc::new(Mutex::new(None)),
         })
     }
 
-    /// TODO: START_RECEIVING_CONNECTIONS AND START_RECEVING_MESSAGES?
+    /// TODO: START_ACCEPTING_CONNECTIONS AND START_RECEVING_MESSAGES?
 
     /// Method to use for the ability to connect the client to an outside address,\
     /// handling it as same "Connection" as all receiving connections\
@@ -96,12 +97,12 @@ impl TcpNode {
     /// Let the client to receive messages\
     /// This method will start a seperate thread to accept incoming tcp connections\
     /// and transform them into the 'Connection' made type and store them
-    pub fn start_receiving(&mut self) {
+    pub fn start_accepting_connections(&mut self) {
         let tcp_listener = self.tcp_listener.try_clone().unwrap();
         let connections = self.connections.clone();
         let sender_to_client = self.sender_to_client.clone();
         let senders_to_connections = self.senders_to_connections.clone();
-        let value_handling_method = self.value_handling_method.clone();
+        let value_handling_method = self.message_handling_method.clone();
         let connection_handling_method = self.connection_handling_method.clone();
         self.new_connections_handle = Some(spawn(move || {
             for stream in tcp_listener.incoming() {
@@ -136,10 +137,12 @@ impl TcpNode {
         todo!()
     }
 
-    /// Let the client to send messages\
-    /// This method will start a thread to handle sending\
-    /// messages to all connected at the moment Connections\
-    /// `Its required to call this before wanting to send messages`
+    /// Let the client send messages\
+    /// * A thread will be started to handle sending messages\
+    /// * The node will create appropriate sender and receiver for this task\
+    /// * This destroys existing sender and receiver
+    ///
+    /// `Its required to call this before wanting to send messages`\
     pub fn start_sending(&mut self) {
         let (sender_to_connections, receiver_of_sender_to_connections) = channel::<String>();
         self.sender_to_connections = Some(sender_to_connections);
@@ -151,10 +154,15 @@ impl TcpNode {
         ));
     }
 
+    /// * Node's thread handling sending messages will be removed\
+    /// * This perserves existing sender and receiver**
     pub fn pause_sending(&mut self) {
         self.sender_to_connections_handle = None;
     }
 
+    /// Let the client to send messages\
+    /// * This method will start a thread to handle sending messages to all connections\
+    /// * This perserves existing sender and receiver
     pub fn resume_sending(&mut self) {
         self.sender_to_connections_handle = Some(start_sending(
             self.receiver_of_sender_to_connections.clone(),
@@ -170,7 +178,7 @@ impl TcpNode {
     }
 
     pub fn change_value_handling_method(&self, handling_method: Option<fn(String)>) {
-        *self.value_handling_method.lock().unwrap() = handling_method;
+        *self.message_handling_method.lock().unwrap() = handling_method;
     }
 
     pub fn change_connection_handling_method(&self, handling_method: Option<fn(&mut Connection)>) {
@@ -196,6 +204,7 @@ fn start_sending(
         }
     })
 }
+
 fn start_receiving() {
     todo!("Copy `start_sending` logic over to `start_receiving`")
 }

@@ -1,4 +1,4 @@
-use serde_json::Value;
+// use serde_json::String;
 use std::{
     io::Result,
     net::{TcpListener, TcpStream},
@@ -15,23 +15,25 @@ pub struct TcpNode {
     pub connections: Arc<Mutex<Vec<Connection>>>,
     tcp_listener: TcpListener,
     /// connections send messages here
-    pub receiver_of_messages_from_connections: Receiver<Value>,
+    pub receiver_of_messages_from_connections: Receiver<String>,
     /// sender given to each conenction to send the client new messages
-    sender_to_client: Sender<Value>,
+    sender_to_client: Sender<String>,
     /// vec storing each sender of every connection
-    senders_to_connections: Arc<Mutex<Vec<Sender<Value>>>>,
+    senders_to_connections: Arc<Mutex<Vec<Sender<String>>>>,
     /// thread accepting new connections
     /// * The thread will be created only during the `start_receiving` method
     new_connections_handle: Option<JoinHandle<()>>,
     /// * Sender to send messages to connections
     /// * May be None if `start_receiving` hasn't been called yet
-    pub sender_to_connections: Option<Sender<Value>>,
+    pub sender_to_connections: Option<Sender<String>>,
+    ///
+    receiver_of_sender_to_connections: Arc<Mutex<Option<Receiver<String>>>>,
     /// thread sending messages of the client to all
     /// * May be None if `start_receiving` hasn't been called yet
     /// * `TODO: TO CLOSE THREAD WE JOIN IT AND TAKE BACK THE RECEIVER TO NOT BREAK CONNECTION WITH THE SENDER
     sender_to_connections_handle: Option<JoinHandle<()>>,
     ///
-    value_handling_method: Arc<Mutex<Option<fn(Value)>>>,
+    value_handling_method: Arc<Mutex<Option<fn(String)>>>,
     ///
     connection_handling_method: Arc<Mutex<Option<fn(&mut Connection)>>>,
 }
@@ -62,6 +64,7 @@ impl TcpNode {
             senders_to_connections: Arc::new(Mutex::new(Vec::new())),
             new_connections_handle: None,
             sender_to_connections: None,
+            receiver_of_sender_to_connections: Arc::new(Mutex::new(None)),
             sender_to_connections_handle: None,
             value_handling_method: Arc::new(Mutex::new(None)),
             connection_handling_method: Arc::new(Mutex::new(None)),
@@ -73,7 +76,7 @@ impl TcpNode {
     /// Method to use for the ability to connect the client to an outside address,\
     /// handling it as same "Connection" as all receiving connections\
     /// `handling_method` may be supplied to bake message handling locally within the connection
-    pub fn connect(&mut self, address: &str, handling_method: Option<fn(Value)>) -> Result<()> {
+    pub fn connect(&mut self, address: &str, handling_method: Option<fn(String)>) -> Result<()> {
         let stream = TcpStream::connect(address)?;
         let (s, r) = channel();
         let c = Connection::new(
@@ -102,7 +105,7 @@ impl TcpNode {
         let connection_handling_method = self.connection_handling_method.clone();
         self.new_connections_handle = Some(spawn(move || {
             for stream in tcp_listener.incoming() {
-                let (s, r) = channel::<Value>();
+                let (s, r) = channel::<String>();
                 let mut c = Connection::new(
                     stream.unwrap(),
                     sender_to_client.clone(),
@@ -138,34 +141,61 @@ impl TcpNode {
     /// messages to all connected at the moment Connections\
     /// `Its required to call this before wanting to send messages`
     pub fn start_sending(&mut self) {
-        let senders_to_connections_clone = self.senders_to_connections.clone();
-        let (sender_to_connections, receiver_of_sender_to_connections) = channel::<Value>();
+        let (sender_to_connections, receiver_of_sender_to_connections) = channel::<String>();
         self.sender_to_connections = Some(sender_to_connections);
-        self.sender_to_connections_handle = Some(spawn(move || {
-            while let Ok(message) = receiver_of_sender_to_connections.recv() {
-                for sender_to_connection in senders_to_connections_clone.lock().unwrap().iter() {
-                    sender_to_connection.send(message.clone()).unwrap();
-                }
-            }
-        }));
+        self.receiver_of_sender_to_connections =
+            Arc::new(Mutex::new(Some(receiver_of_sender_to_connections)));
+        self.sender_to_connections_handle = Some(start_sending(
+            self.receiver_of_sender_to_connections.clone(),
+            self.senders_to_connections.clone(),
+        ));
     }
 
     pub fn pause_sending(&mut self) {
-        // self.sender_to_connections_handle.unwrap().join();
-        todo!()
+        self.sender_to_connections_handle = None;
+    }
+
+    pub fn resume_sending(&mut self) {
+        self.sender_to_connections_handle = Some(start_sending(
+            self.receiver_of_sender_to_connections.clone(),
+            self.senders_to_connections.clone(),
+        ))
     }
 
     /// This method will remove the clients' handling of sending messages
     pub fn stop_sending(&mut self) {
         self.sender_to_connections = None;
         self.sender_to_connections_handle = None;
+        self.receiver_of_sender_to_connections = Arc::new(Mutex::new(None));
     }
 
-    pub fn change_value_handling_method(&self, handling_method: Option<fn(Value)>) {
+    pub fn change_value_handling_method(&self, handling_method: Option<fn(String)>) {
         *self.value_handling_method.lock().unwrap() = handling_method;
     }
 
     pub fn change_connection_handling_method(&self, handling_method: Option<fn(&mut Connection)>) {
         *self.connection_handling_method.lock().unwrap() = handling_method;
     }
+}
+
+fn start_sending(
+    receiver_of_sender_to_connections: Arc<Mutex<Option<Receiver<String>>>>,
+    senders_to_connections: Arc<Mutex<Vec<Sender<String>>>>,
+) -> JoinHandle<()> {
+    spawn(move || {
+        while let Ok(message) = receiver_of_sender_to_connections
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .recv()
+        {
+            for sender_to_connection in senders_to_connections.lock().unwrap().iter() {
+                sender_to_connection.send(message.clone()).unwrap();
+            }
+        }
+    })
+}
+fn start_receiving() {
+    todo!("Copy `start_sending` logic over to `start_receiving`")
 }

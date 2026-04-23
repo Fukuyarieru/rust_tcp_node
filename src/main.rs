@@ -24,7 +24,7 @@ fn main() {
                     let mut counter = 0;
                     loop {
                         // println!("{}", counter);
-                        _ = sender.send(json!(counter));
+                        _ = sender.send(counter.to_string());
                         counter += 1;
                     }
                 });

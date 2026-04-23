@@ -31,12 +31,12 @@ impl Connection {
     /// we give this function the receiver and handle the sender to be however we want to send messages to this Connection
     pub fn new(
         stream: TcpStream,
-        // own client may recieve message, these are sent to a receiver on the client through this sender the Connection got
-        output_sender: Sender<String>,
+        // own client may receive message, these are sent to a receiver on the client through this sender the Connection got
+        sender_of_messages_to_the_client: Sender<String>,
         // own client may send messages, this is a copy of the sender
-        input_sender: Sender<String>,
+        sender_of_messages_to_the_connection: Sender<String>,
         // own client may send messages, which are recieved by the Connection through this receiver
-        input_receiver: Receiver<String>,
+        recevier_of_messages_for_the_connection: Receiver<String>,
         // local method stored with the connection,
         // applies on incoming messages from the `_read_handle`,
         handle_method: Option<fn(String)>,
@@ -56,17 +56,17 @@ impl Connection {
                         println!("{:?}", method);
                         method(message.clone())
                     }
-                    output_sender.send(message).unwrap();
+                    sender_of_messages_to_the_client.send(message).unwrap();
                 }
             }),
             _write_handle: spawn(move || {
-                while let Ok(message) = input_receiver.recv() {
+                while let Ok(message) = recevier_of_messages_for_the_connection.recv() {
                     writer.write_all(message.as_bytes()).unwrap();
                     writer.flush().unwrap();
                 }
             }),
             connection_handle_method: handling_method,
-            sender_to_connection: input_sender,
+            sender_to_connection: sender_of_messages_to_the_connection,
         }
     }
 

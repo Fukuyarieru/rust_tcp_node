@@ -1,15 +1,13 @@
+use crate::tcp_node::TcpNode;
 use std::{
     thread::{self, sleep},
     time::Duration,
 };
 
-use serde_json::json;
-
-use crate::tcp_node::TcpNode;
-
 mod connection;
-mod playground;
 mod tcp_node;
+
+pub type Method<T> = Box<dyn FnMut(T) + Send + 'static>;
 
 const ADDRESS: &str = "127.0.0.1:8080";
 
@@ -17,19 +15,21 @@ fn main() {
     let client = TcpNode::new_with_address(ADDRESS);
     match client {
         Ok(mut node) => {
-            node.start_receiving();
-            node.change_connection_handling_method(Some(|c| {
+            node.start_accepting_connections();
+            node.start_sending();
+            node.change_connection_handling_method(Some(Box::new(|c| {
                 let sender = c.sender_to_connection();
                 thread::spawn(move || {
                     let mut counter = 0;
                     loop {
-                        // println!("{}", counter);
+                        println!("{}", counter);
                         _ = sender.send(counter.to_string());
                         counter += 1;
+                        sleep(Duration::from_millis(100));
                     }
                 });
-            }));
-            loop {}
+            })));
+            thread::park();
 
             // node.change_value_handling_method(Some(|value| {}));
             // TODO: CHANGE_HANDLING_CONNECTIONS
@@ -42,10 +42,8 @@ fn main() {
         }
         Err(_) => {
             let mut node = TcpNode::new().unwrap();
-            node.start_receiving();
-            _ = node.connect(ADDRESS, None);
-            node.change_value_handling_method(Some(|value| println!("{}", value)));
-            loop {}
+            _ = node.connect(ADDRESS, Some(|value| println!("{}", value)));
+            thread::park();
 
             // let mut client = TcpNode::new().unwrap();
             // client.start_sending();

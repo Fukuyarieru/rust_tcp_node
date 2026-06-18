@@ -6,10 +6,10 @@ use std::{
         Arc, Mutex,
         mpsc::{Receiver, Sender},
     },
-    thread::{JoinHandle, spawn},
+    thread::{self, JoinHandle, spawn},
 };
 
-type Method = Box<dyn FnMut(String) + Send + 'static>;
+type Method = crate::Method<String>;
 
 // TODO: Combine handles into a single _worker_handle, which does both jobs
 pub struct Connection {
@@ -28,11 +28,37 @@ pub struct Connection {
     sender_to_connection: Sender<String>,
 }
 
+pub fn connection_worker_thread() -> JoinHandle<()> {
+    spawn(|| {
+        // for message in reader.lines() {
+        //     match message {
+        //         Ok(message) => {
+        //             if let Some(method) = handling_method_clone.lock().unwrap().as_mut() {
+        //                 // #[cfg(debug_assertions)]
+        //                 // println!("{:?}", method);
+        //                 method(message.clone())
+        //             }
+        //             sender_of_messages_to_the_client.send(message).unwrap();
+        //         }
+        //         Err(e) => eprintln!("{}", e),
+        //     }
+        // }
+        // while let Ok(message) = recevier_of_messages_for_the_connection.recv() {
+        //     // TODO: buffer may get full, handle erroring
+        //     writer.write_all((message + "\n").as_bytes()).unwrap();
+        //     writer.flush().unwrap();
+        // }
+    })
+    // receiving
+    //
+    // sending
+    //
+}
 impl Connection {
     /// This is the method to convert tcp stream into a "Connection"\
     /// interactions with the Connection are made using a channel() made before calling this method (sender,receiver)\
     /// we give this function the receiver and handle the sender to be however we want to send messages to this Connection
-    pub fn new<F: FnMut(String) + Debug + Send + 'static>(
+    pub fn new<F: FnMut(String) + Send + 'static>(
         stream: TcpStream,
         // own client may receive message, these are sent to a receiver on the client through this sender the Connection got
         sender_of_messages_to_the_client: Sender<String>,

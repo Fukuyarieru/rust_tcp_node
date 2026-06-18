@@ -7,8 +7,6 @@ use std::{
 mod connection;
 mod tcp_node;
 
-pub type Method<T> = Box<dyn FnMut(T) + Send + 'static>;
-
 const ADDRESS: &str = "127.0.0.1:8080";
 
 fn main() {
@@ -17,7 +15,8 @@ fn main() {
         Ok(mut node) => {
             node.start_accepting_connections();
             node.start_sending();
-            node.change_connection_handling_method(Some(Box::new(|c| {
+            node.change_message_handling_method(|m| println!("{}", m));
+            node.change_connection_handling_method(|c| {
                 let sender = c.sender_to_connection();
                 thread::spawn(move || {
                     let mut counter = 0;
@@ -28,7 +27,7 @@ fn main() {
                         sleep(Duration::from_millis(100));
                     }
                 });
-            })));
+            });
             thread::park();
 
             // node.change_value_handling_method(Some(|value| {}));
@@ -42,7 +41,7 @@ fn main() {
         }
         Err(_) => {
             let mut node = TcpNode::new().unwrap();
-            _ = node.connect(ADDRESS, Some(|value| println!("{}", value)));
+            _ = node.connect(ADDRESS);
             thread::park();
 
             // let mut client = TcpNode::new().unwrap();

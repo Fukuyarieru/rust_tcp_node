@@ -1,6 +1,7 @@
+#![allow(dead_code)]
+
 use crate::connection::Connection;
 use std::{
-    fmt::Debug,
     io::Result,
     net::{TcpListener, TcpStream},
     sync::{
@@ -11,9 +12,6 @@ use std::{
 };
 
 // TODO: CHANGE CONNECTIONS USING WHILE LOOPS THAT FIRST LOOK AT A ATOMICBOOL AND THEN WORK
-
-/// Method is an FnMut with T for the taking args
-use crate::Method;
 
 pub struct TcpNode {
     tcp_listener: TcpListener,
@@ -36,13 +34,15 @@ pub struct TcpNode {
     /// thread sending messages of the client to all connections
     /// * May be None if `start_receiving` hasn't been called yet
     sender_to_connections_handle: Option<JoinHandle<()>>,
-    /// method given to every connection on every message received by the node
-    message_handling_method: Arc<Mutex<Option<Method<String>>>>,
-    // method applied on every connection after construction
-    connection_handling_method: Arc<Mutex<Option<Method<Connection>>>>,
+    ///
+    message_handling_method: Arc<Mutex<fn(String)>>,
+    ///
+    connection_hanling_method: Arc<Mutex<fn(&mut Connection)>>,
 }
 
-pub fn node_worker_thread(node: &TcpNode) {}
+pub fn node_worker_thread(_node: &TcpNode) {
+    todo!()
+}
 
 impl TcpNode {
     /// Method to create a new client.\
@@ -74,8 +74,8 @@ impl TcpNode {
             sender_to_connections: None,
             receiver_of_sender_to_connections: Arc::new(Mutex::new(None)),
             sender_to_connections_handle: None,
-            message_handling_method: Arc::new(Mutex::new(None)),
-            connection_handling_method: Arc::new(Mutex::new(None)),
+            message_handling_method: Arc::new(Mutex::new(|_| {})),
+            connection_hanling_method: Arc::new(Mutex::new(|_| {})),
         })
     }
 
@@ -84,18 +84,19 @@ impl TcpNode {
     /// Method to use for the ability to connect the client to an outside address,\
     /// handling it as same "Connection" as all receiving connections\
     /// `handling_method` may be supplied to bake message handling locally within the connection
-    pub fn connect(&mut self, address: &str, handling_method: Option<fn(String)>) -> Result<()> {
+    pub fn connect(&mut self, address: &str) -> Result<()> {
         let stream = TcpStream::connect(address)?;
         let (s, r) = channel();
-        let c = Connection::new(
+        let mut c = Connection::new(
             stream,
             self.sender_to_client.clone(),
             s.clone(),
             r,
-            handling_method,
+            self.message_handling_method.clone(),
         );
         #[cfg(debug_assertions)]
         println!("CONNECTING -> {:?}", c);
+        self.connection_hanling_method.lock().unwrap()(&mut c);
         self.senders_to_connections.lock().unwrap().push(s);
         self.connections.lock().unwrap().push(c);
         Ok(())
@@ -112,8 +113,7 @@ impl TcpNode {
         let connections = self.connections.clone();
         let sender_to_client = self.sender_to_client.clone();
         let senders_to_connections = self.senders_to_connections.clone();
-        let value_handling_method = self.message_handling_method.clone();
-        let connection_handling_method = self.connection_handling_method.clone();
+        let message_handling_method = self.message_handling_method.clone();
         self.new_connections_handle = Some(spawn(move || {
             for stream in tcp_listener.incoming() {
                 let (s, r) = channel::<String>();
@@ -122,13 +122,8 @@ impl TcpNode {
                     sender_to_client.clone(),
                     s.clone(),
                     r,
-                    value_handling_method.lock().unwrap().clone(),
+                    message_handling_method.clone(),
                 );
-                if let Some(ref mut method) = *connection_handling_method.lock().unwrap() {
-                    // #[cfg(debug_assertions)]
-                    // println!("{:?}", method);
-                    method(c);
-                }
                 #[cfg(debug_assertions)]
                 println!("CONNECTION -> {:?}", c);
                 connections.lock().unwrap().push(c);
@@ -187,12 +182,12 @@ impl TcpNode {
         self.receiver_of_sender_to_connections = Arc::new(Mutex::new(None));
     }
 
-    pub fn change_value_handling_method(&self, handling_method: Option<Method<String>>) {
-        *self.message_handling_method.lock().unwrap() = handling_method;
+    pub fn change_message_handling_method(&mut self, f: fn(String)) {
+        *self.message_handling_method.lock().unwrap() = f;
     }
 
-    pub fn change_connection_handling_method(&self, handling_method: Option<Method<Connection>>) {
-        *self.connection_handling_method.lock().unwrap() = handling_method;
+    pub fn change_connection_handling_method(&mut self, f: fn(&mut Connection)) {
+        *self.connection_hanling_method.lock().unwrap() = f;
     }
 }
 

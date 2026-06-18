@@ -10,13 +10,13 @@ mod tcp_node;
 const ADDRESS: &str = "127.0.0.1:8080";
 
 fn main() {
-    let client = TcpNode::new_with_address(ADDRESS);
-    match client {
-        Ok(mut node) => {
-            node.start_accepting_connections();
-            node.start_sending();
-            node.change_message_handling_method(|m| println!("{}", m));
-            node.change_connection_handling_method(|c| {
+    let node = TcpNode::new_with_address(ADDRESS);
+    match node {
+        Ok(mut server) => {
+            server.start_accepting_connections();
+            server.start_sending();
+            // node.change_message_handling_method(|m| println!("{}", m));
+            server.change_connection_handling_method(|c| {
                 let sender = c.sender_to_connection();
                 thread::spawn(move || {
                     let mut counter = 0;
@@ -39,9 +39,26 @@ fn main() {
             //     println!("{}", message)
             // }
         }
-        Err(_) => {
+        Err(mut _client) => {
             let mut node = TcpNode::new().unwrap();
+            node.start_accepting_connections();
+            node.start_sending();
+
+            node.change_connection_handling_method(|c| {
+                let sender = c.sender_to_connection();
+                loop {
+                    _ = sender.send(String::from("SPAM"));
+                }
+            });
+
             _ = node.connect(ADDRESS);
+
+            node.change_message_handling_method(|m| println!("{}", m));
+
+            // let sender = node.start_sending();
+            // sender.send(String::from("b"));
+
+            // node.change
             thread::park();
 
             // let mut client = TcpNode::new().unwrap();

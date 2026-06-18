@@ -148,15 +148,16 @@ impl TcpNode {
     /// * This destroys existing sender and receiver
     ///
     /// `Its required to call this before wanting to send messages`
-    pub fn start_sending(&mut self) {
+    pub fn start_sending(&mut self) -> Sender<String> {
         let (sender_to_connections, receiver_of_sender_to_connections) = channel::<String>();
-        self.sender_to_connections = Some(sender_to_connections);
+        self.sender_to_connections = Some(sender_to_connections.clone());
         self.receiver_of_sender_to_connections =
             Arc::new(Mutex::new(Some(receiver_of_sender_to_connections)));
         self.sender_to_connections_handle = Some(start_sending(
             self.receiver_of_sender_to_connections.clone(),
             self.senders_to_connections.clone(),
         ));
+        sender_to_connections
     }
 
     /// * Node's thread handling sending messages will be removed\

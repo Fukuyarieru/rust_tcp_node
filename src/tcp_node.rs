@@ -17,8 +17,9 @@ pub struct TcpNode {
     tcp_listener: TcpListener,
     /// stored connections
     pub connections: Arc<Mutex<Vec<Connection>>>,
-    /// connections send messages here
-    pub receiver_of_messages_from_connections: Receiver<String>,
+    /// connections send messages here\
+    /// `receiver_of_messages_from_connections`
+    pub messages: Receiver<String>,
     /// sender given to each conenction to send the client new messages
     sender_to_client: Sender<String>,
     /// senders to every connection
@@ -28,7 +29,7 @@ pub struct TcpNode {
     new_connections_handle: Option<JoinHandle<()>>,
     /// * Sender to send messages to connections
     /// * May be None if `start_receiving` hasn't been called yet
-    sender_to_connections: Option<Sender<String>>,
+    pub sender_to_connections: Option<Sender<String>>,
     ///
     receiver_of_sender_to_connections: Arc<Mutex<Option<Receiver<String>>>>,
     /// thread sending messages of the client to all connections
@@ -67,7 +68,7 @@ impl TcpNode {
         Ok(Self {
             connections: Arc::new(Mutex::new(Vec::new())),
             tcp_listener: tcp_listener,
-            receiver_of_messages_from_connections: receiver,
+            messages: receiver,
             sender_to_client: sender,
             senders_to_connections: Arc::new(Mutex::new(Vec::new())),
             new_connections_handle: None,
